@@ -52,11 +52,10 @@ public class BoidController : MonoBehaviour
     [Range(0f, 1f)] public float boundsSoftZone = 0.85f; // start turning before edge
     public float boundsTurnStrength = 18f;
 
-    [Header("Leader (controller) bias")]
-    [Range(0f, 100f)] public float controllerAlignWeight   = 1.2f; // match controller forward
-    [Range(0f, 100f)] public float controllerCohesionWeight = 0.6f; // drift toward controller position
     [Range(0f, 1f)] public float speedNoise = 0.12f;             // ±% speed jitter
     public float noiseTimeScale = 0.9f;                           // Hz-ish (Perlin-ish surrogate)
+
+    public float3 FlockCenter { get; private set; }
 
     // Internal
     NativeArray<float3> _positions;
@@ -93,12 +92,12 @@ public class BoidController : MonoBehaviour
                 transform.position.y + rnd.NextFloat(-spawnExtents.y, spawnExtents.y),
                 transform.position.z + rnd.NextFloat(-spawnExtents.z, spawnExtents.z)
             );
-            
+
             // random XZ velocity
             var dir = math.normalize(new float3(rnd.NextFloat(-1f, 1f), 0f, rnd.NextFloat(-1f, 1f)));
             var vel = dir * rnd.NextFloat(0.25f * maxSpeed, 0.75f * maxSpeed);
 
-            _positions[i]  = pos;
+            _positions[i] = pos;
             _velocities[i] = vel;
 
             tfArray[i] = Instantiate(boidPrefab, (Vector3)pos, Quaternion.identity, boidsParent.transform).transform;
@@ -106,13 +105,12 @@ public class BoidController : MonoBehaviour
 
         _transforms = new TransformAccessArray(tfArray);
         // Spatial hash capacity ~ N * (average cell population)
-        _cellMap  = new NativeParallelMultiHashMap<int, int>(boidCount * 2, Allocator.Persistent);
+        _cellMap = new NativeParallelMultiHashMap<int, int>(boidCount * 2, Allocator.Persistent);
         _cellSize = math.max(0.75f * neighborRadius, 0.1f);
     }
 
     void Update()
     {
-        _handle.Complete();
         float dt = math.min(Time.deltaTime, 1f / 30f);
 
         _cellMap.Clear();
@@ -123,60 +121,73 @@ public class BoidController : MonoBehaviour
             writer = _cellMap.AsParallelWriter()
         }.Schedule(_positions.Length, 128);
 
-        build.Complete();
 
         // 2) Steer
         var steer = new BoidSteerJob
         {
-            positions        = _positions,
-            velocities       = _velocities,        // READ
-            outVelocities    = _velocitiesNext,    // WRITE
-            cellMap          = _cellMap,
-            cellSize         = _cellSize,
+            positions = _positions,
+            velocities = _velocities,        // READ
+            outVelocities = _velocitiesNext,    // WRITE
+            cellMap = _cellMap,
+            cellSize = _cellSize,
 
-            neighborRadius   = neighborRadius,
+            neighborRadius = neighborRadius,
             separationRadius = separationRadius,
-            maxSpeed         = maxSpeed,
-            maxForce         = maxForce,
-            alignmentWeight  = alignmentWeight,
-            cohesionWeight   = cohesionWeight,
+            maxSpeed = maxSpeed,
+            maxForce = maxForce,
+            alignmentWeight = alignmentWeight,
+            cohesionWeight = cohesionWeight,
             separationWeight = separationWeight,
 
             // bounds
-            center             = float3.zero,
-            boundsRadius       = boundsRadius,
-            softZone           = boundsSoftZone,
+            center = float3.zero,
+            boundsRadius = boundsRadius,
+            softZone = boundsSoftZone,
             boundsTurnStrength = boundsTurnStrength,
 
-            // NEW: controller bias
-            controllerForward   = (float3)transform.forward,
-            controllerPosition  = (float3)transform.position,
-            controllerAlignWeight   = controllerAlignWeight,
-            controllerCohesionWeight= controllerCohesionWeight,
-
             // NEW: noise
-            time            = (float)Time.time,
-            noiseTimeScale  = noiseTimeScale,
-            speedNoise      = speedNoise,
+            time = (float)Time.time,
+            noiseTimeScale = noiseTimeScale,
+            speedNoise = speedNoise,
 
-            deltaTime       = dt
+            deltaTime = dt
         }.Schedule(_positions.Length, 128, build);
 
         // 3) Integrate + write to transforms
         var integrate = new IntegrateAndApplyJob
         {
-            positions  = _positions,
+            positions = _positions,
             velocities = _velocitiesNext,
-            deltaTime  = dt
+            deltaTime = dt
         }.Schedule(_transforms, steer);
 
         _handle = integrate;
         JobHandle.ScheduleBatchedJobs();
     }
 
+    public float3 GetFlockCenter()
+    {
+        float3 sum = float3.zero;
+        for (int i = 0; i < _positions.Length; i++)
+        {
+            sum += _positions[i];
+        }
+        return sum / math.max(1, _positions.Length);
+    }
+
     void LateUpdate()
     {
         _handle.Complete();
+        var tmp = _velocities;
+        _velocities = _velocitiesNext;
+        _velocitiesNext = tmp;
+
+        // compute and cache flock center AFTER jobs finished writing
+        float3 sum = float3.zero;
+        for (int i = 0; i < _positions.Length; i++)
+            sum += _positions[i];
+
+        FlockCenter = sum / math.max(1, _positions.Length);
     }
 
     void OnDestroy()
@@ -186,7 +197,7 @@ public class BoidController : MonoBehaviour
         if (_positions.IsCreated) _positions.Dispose();
         if (_velocities.IsCreated) _velocities.Dispose();
         if (_velocitiesNext.IsCreated) _velocitiesNext.Dispose();
-        if (_cellMap.IsCreated)    _cellMap.Dispose();
+        if (_cellMap.IsCreated) _cellMap.Dispose();
         if (_transforms.isCreated) _transforms.Dispose();
     }
 
@@ -219,7 +230,7 @@ public class BoidController : MonoBehaviour
         [ReadOnly] public NativeArray<float3> velocities;
         public NativeArray<float3> outVelocities;
 
-        [ReadOnly] public NativeParallelMultiHashMap<int,int> cellMap;
+        [ReadOnly] public NativeParallelMultiHashMap<int, int> cellMap;
         public float cellSize;
 
         // flock weights
@@ -229,20 +240,20 @@ public class BoidController : MonoBehaviour
 
         // bounds
         public float3 center;
-        public float  boundsRadius, softZone, boundsTurnStrength;
+        public float boundsRadius, softZone, boundsTurnStrength;
 
         // NEW: controller bias
         public float3 controllerForward;
         public float3 controllerPosition;
-        public float  controllerAlignWeight;
-        public float  controllerCohesionWeight;
+        public float controllerAlignWeight;
+        public float controllerCohesionWeight;
 
         // NEW: noise
-        public float  time;
-        public float  noiseTimeScale;
-        public float  speedNoise;
+        public float time;
+        public float noiseTimeScale;
+        public float speedNoise;
 
-        public float  deltaTime;
+        public float deltaTime;
 
 
         public void Execute(int i)
@@ -252,9 +263,9 @@ public class BoidController : MonoBehaviour
 
             // --- Neighbor accumulation ---
             float3 sumAlign = 0f;
-            float3 sumCoh   = 0f;
-            float3 sumSep   = 0f;
-            int    neighborCount = 0;
+            float3 sumCoh = 0f;
+            float3 sumSep = 0f;
+            int neighborCount = 0;
 
             int cellX = (int)math.floor(pos.x / cellSize);
             int cellZ = (int)math.floor(pos.z / cellSize);
@@ -277,14 +288,14 @@ public class BoidController : MonoBehaviour
 
                             float3 p2 = positions[idx];
                             float3 to = p2 - pos;
-                            float  d2 = math.lengthsq(to);
+                            float d2 = math.lengthsq(to);
 
                             if (d2 <= nRadSqr)
                             {
                                 neighborCount++;
 
                                 sumAlign += velocities[idx];
-                                sumCoh   += p2;
+                                sumCoh += p2;
 
                                 if (d2 <= sRadSqr && d2 > 1e-6f)
                                 {
@@ -307,29 +318,21 @@ public class BoidController : MonoBehaviour
 
                 // Alignment
                 float3 desiredAlign = SafeNormalize(sumAlign * inv) * maxSpeed;
-                float3 steerAlign   = Limit(desiredAlign - vel, maxForce);
+                float3 steerAlign = Limit(desiredAlign - vel, maxForce);
                 accel += steerAlign * alignmentWeight;
 
                 // Cohesion
                 float3 centerOfMass = sumCoh * inv;
-                float3 desiredCoh   = SafeNormalize(centerOfMass - pos) * maxSpeed;
-                float3 steerCoh     = Limit(desiredCoh - vel, maxForce);
+                float3 desiredCoh = SafeNormalize(centerOfMass - pos) * maxSpeed;
+                float3 steerCoh = Limit(desiredCoh - vel, maxForce);
                 accel += steerCoh * cohesionWeight;
 
                 // Separation
                 float3 desiredSep = math.lengthsq(sumSep) > 0f ? SafeNormalize(sumSep) * maxSpeed : 0f;
-                float3 steerSep   = Limit(desiredSep - vel, maxForce);
+                float3 steerSep = Limit(desiredSep - vel, maxForce);
                 accel += steerSep * separationWeight;
             }
 
-            // --- Controller alignment & cohesion (leader bias) ---
-            float3 desiredCtrlAlign = SafeNormalize(controllerForward) * maxSpeed;
-            float3 steerCtrlAlign   = Limit(desiredCtrlAlign - vel, maxForce);
-            accel += steerCtrlAlign * controllerAlignWeight;
-
-            float3 desiredCtrlCoh   = SafeNormalize(controllerPosition - pos) * maxSpeed;
-            float3 steerCtrlCoh     = Limit(desiredCtrlCoh - vel, maxForce);
-            accel += steerCtrlCoh * controllerCohesionWeight;
 
             // --- Bounds steering (soft) ---
             float dist = math.length(pos - center);
@@ -337,7 +340,7 @@ public class BoidController : MonoBehaviour
             if (dist > trigger)
             {
                 float3 desired = SafeNormalize(center - pos) * maxSpeed;
-                float  t = math.saturate((dist - trigger) / math.max(1e-3f, boundsRadius - trigger));
+                float t = math.saturate((dist - trigger) / math.max(1e-3f, boundsRadius - trigger));
                 float3 steer = Limit(desired - vel, maxForce) * (boundsTurnStrength * t);
                 accel += steer;
             }
@@ -357,7 +360,7 @@ public class BoidController : MonoBehaviour
                 h ^= 2747636419u; h *= 2654435769u; h ^= h >> 16; h *= 2654435769u; h ^= h >> 16;
                 float phase = (h & 0x00FFFFFFu) / 16777216f * 100f; // [0,100)
                 float wiggle = math.sin((time * noiseTimeScale) + phase); // [-1,1]
-                float scale  = 1f + (wiggle * speedNoise);
+                float scale = 1f + (wiggle * speedNoise);
                 vel *= scale;
             }
 
