@@ -302,6 +302,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &272479051
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 272479052}
+  m_Layer: 0
+  m_Name: Boids
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &272479052
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 272479051}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: -0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &292229609
 GameObject:
   m_ObjectHideFlags: 0
@@ -651,6 +682,7 @@ MonoBehaviour:
   boidCount: 10000
   spawnExtents: {x: 10, y: 10, z: 10}
   boidPrefab: {fileID: 100000, guid: 354e86f41ea4845948b8fe4601eccb24, type: 3}
+  boidsParent: {fileID: 272479051}
   neighborRadius: 3.5
   separationRadius: 1.1
   maxSpeed: 8
@@ -719,3 +751,4 @@ SceneRoots:
   - {fileID: 230750416}
   - {fileID: 1620263375}
   - {fileID: 60053071}
+  - {fileID: 272479052}
