@@ -171,16 +171,6 @@ public class BoidController : MonoBehaviour
         JobHandle.ScheduleBatchedJobs();
     }
 
-    public float3 GetFlockCenter()
-    {
-        float3 sum = float3.zero;
-        for (int i = 0; i < _positions.Length; i++)
-        {
-            sum += _positions[i];
-        }
-        return sum / math.max(1, _positions.Length);
-    }
-
     void LateUpdate()
     {
         _handle.Complete();
