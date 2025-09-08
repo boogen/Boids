@@ -58,10 +58,12 @@ public class BoidController : MonoBehaviour
     public float3 FlockCenter { get; private set; }
 
     // Internal
+    Material _material;
+    Mesh _mesh;
     NativeArray<float3> _positions;
     NativeArray<float3> _velocities;
     NativeArray<float3> _velocitiesNext;
-    TransformAccessArray _transforms;
+    NativeArray<Matrix4x4> _matrices;
 
     // Spatial hash (2D XZ)
     NativeParallelMultiHashMap<int, int> _cellMap;
@@ -80,9 +82,14 @@ public class BoidController : MonoBehaviour
         _positions = new NativeArray<float3>(boidCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         _velocities = new NativeArray<float3>(boidCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         _velocitiesNext = new NativeArray<float3>(boidCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+        _matrices = new NativeArray<Matrix4x4>(boidCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+        var meshFilter = boidPrefab.GetComponentInChildren<MeshFilter>();
+        var meshRenderer = boidPrefab.GetComponentInChildren<MeshRenderer>();
+        _mesh = meshFilter.sharedMesh;
+        _material = meshRenderer.sharedMaterial;
 
         // Spawn
-        var tfArray = new Transform[boidCount];
         var rnd = new Unity.Mathematics.Random((uint)System.Environment.TickCount);
 
         for (int i = 0; i < boidCount; ++i)
@@ -100,10 +107,8 @@ public class BoidController : MonoBehaviour
             _positions[i] = pos;
             _velocities[i] = vel;
 
-            tfArray[i] = Instantiate(boidPrefab, (Vector3)pos, Quaternion.identity, boidsParent.transform).transform;
         }
 
-        _transforms = new TransformAccessArray(tfArray);
         // Spatial hash capacity ~ N * (average cell population)
         _cellMap = new NativeParallelMultiHashMap<int, int>(boidCount * 2, Allocator.Persistent);
         _cellSize = math.max(0.75f * neighborRadius, 0.1f);
@@ -157,9 +162,10 @@ public class BoidController : MonoBehaviour
         var integrate = new IntegrateAndApplyJob
         {
             positions = _positions,
+            matrices = _matrices,
             velocities = _velocitiesNext,
             deltaTime = dt
-        }.Schedule(_transforms, steer);
+        }.Schedule(_positions.Length, 128, steer);
 
         _handle = integrate;
         JobHandle.ScheduleBatchedJobs();
@@ -188,6 +194,15 @@ public class BoidController : MonoBehaviour
             sum += _positions[i];
 
         FlockCenter = sum / math.max(1, _positions.Length);
+
+        int batchSize = 1023;
+        for (int i = 0; i < boidCount; i += batchSize)
+        {
+            int count = math.min(batchSize, boidCount - i);
+            var array = new Matrix4x4[count];
+            NativeArray<Matrix4x4>.Copy(_matrices, i, array, 0, count);
+            Graphics.DrawMeshInstanced(_mesh, 0, _material, array);
+        }
     }
 
     void OnDestroy()
@@ -198,7 +213,7 @@ public class BoidController : MonoBehaviour
         if (_velocities.IsCreated) _velocities.Dispose();
         if (_velocitiesNext.IsCreated) _velocitiesNext.Dispose();
         if (_cellMap.IsCreated) _cellMap.Dispose();
-        if (_transforms.isCreated) _transforms.Dispose();
+        if (_matrices.IsCreated) _matrices.Dispose();
     }
 
     [BurstCompile]
@@ -415,26 +430,25 @@ public class BoidController : MonoBehaviour
     }
 
     [BurstCompile]
-    struct IntegrateAndApplyJob : IJobParallelForTransform
+    struct IntegrateAndApplyJob : IJobParallelFor
     {
         public NativeArray<float3> positions;
         [ReadOnly] public NativeArray<float3> velocities;
+        public NativeArray<Matrix4x4> matrices;
         public float deltaTime;
 
-        public void Execute(int index, TransformAccess transform)
+        public void Execute(int index)
         {
             float3 p = positions[index] + velocities[index] * deltaTime;
             positions[index] = p;
 
-            // write transform (XZ plane facing)
-            transform.position = (Vector3)p;
 
+            quaternion rot = quaternion.identity;
             float3 v = velocities[index];
             if (math.lengthsq(v) > 1e-6f)
-            {
-                var rot = Quaternion.LookRotation(new Vector3(v.x, 0f, v.z), Vector3.up);
-                transform.rotation = rot;
-            }
+                rot = quaternion.LookRotationSafe(new float3(v.x, 0f, v.z), math.up());
+
+            matrices[index] = Matrix4x4.TRS(p, rot, Vector3.one);
         }
     }
 }
