@@ -211,15 +211,20 @@ public class BoidController : MonoBehaviour
         public void Execute(int index)
         {
             var p = positions[index];
-            var cell = new int2((int)math.floor(p.x / cellSize),
+            var cell = new int3((int)math.floor(p.x / cellSize),
+                                (int)math.floor(p.y / cellSize),
                                 (int)math.floor(p.z / cellSize));
             writer.Add(Hash(cell), index);
         }
 
-        static int Hash(int2 c)
+        static int Hash(int3 c)
         {
-            // Simple 2D hash
-            unchecked { return c.x * 73856093 ^ c.y * 19349663; }
+            unchecked
+            {
+                return c.x * 73856093
+                     ^ c.y * 19349663
+                     ^ c.z * 83492791;
+            }
         }
     }
 
@@ -268,43 +273,47 @@ public class BoidController : MonoBehaviour
             int neighborCount = 0;
 
             int cellX = (int)math.floor(pos.x / cellSize);
+            int cellY = (int)math.floor(pos.y / cellSize);
             int cellZ = (int)math.floor(pos.z / cellSize);
             float nRadSqr = neighborRadius * neighborRadius;
             float sRadSqr = separationRadius * separationRadius;
 
             for (int dz = -1; dz <= 1; dz++)
             {
-                for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
                 {
-                    int2 c = new int2(cellX + dx, cellZ + dz);
-                    NativeParallelMultiHashMapIterator<int> it;
-                    int idx;
-
-                    if (cellMap.TryGetFirstValue(Hash(c), out idx, out it))
+                    for (int dx = -1; dx <= 1; dx++)
                     {
-                        do
+                        var c = new int3(cellX + dx, cellY + dy, cellZ + dz);
+                        NativeParallelMultiHashMapIterator<int> it;
+                        int idx;
+
+                        if (cellMap.TryGetFirstValue(Hash(c), out idx, out it))
                         {
-                            if (idx == i) continue;
-
-                            float3 p2 = positions[idx];
-                            float3 to = p2 - pos;
-                            float d2 = math.lengthsq(to);
-
-                            if (d2 <= nRadSqr)
+                            do
                             {
-                                neighborCount++;
+                                if (idx == i) continue;
 
-                                sumAlign += velocities[idx];
-                                sumCoh += p2;
+                                float3 p2 = positions[idx];
+                                float3 to = p2 - pos;
+                                float d2 = math.lengthsq(to);
 
-                                if (d2 <= sRadSqr && d2 > 1e-6f)
+                                if (d2 <= nRadSqr)
                                 {
-                                    // push away (stronger when closer)
-                                    sumSep -= to / math.max(1e-3f, math.sqrt(d2));
+                                    neighborCount++;
+
+                                    sumAlign += velocities[idx];
+                                    sumCoh += p2;
+
+                                    if (d2 <= sRadSqr && d2 > 1e-6f)
+                                    {
+                                        // push away (stronger when closer)
+                                        sumSep -= to / math.max(1e-3f, math.sqrt(d2));
+                                    }
                                 }
                             }
+                            while (cellMap.TryGetNextValue(out idx, ref it));
                         }
-                        while (cellMap.TryGetNextValue(out idx, ref it));
                     }
                 }
             }
@@ -379,9 +388,14 @@ public class BoidController : MonoBehaviour
             return v;
         }
 
-        static int Hash(int2 c)
+        static int Hash(int3 c)
         {
-            unchecked { return c.x * 73856093 ^ c.y * 19349663; }
+            unchecked
+            {
+                return c.x * 73856093
+                     ^ c.y * 19349663
+                     ^ c.z * 83492791;
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
